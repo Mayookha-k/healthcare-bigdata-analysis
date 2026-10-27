@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+data/raw/
+data/processed/
+src/healthcare-dashboard/
+check_data.py
+inspect_cleaned.py
+spark-warehouse/
+metastore_db/
+derby.log
+.vscode/
+check_data_output.txt
+data/test_spark.py
