@@ -6,7 +6,7 @@ Run:  .\\venv\\Scripts\\python.exe -m streamlit run dashboard.py
 
 Pages: Overview | Diagnoses | Severity & Stay | Patients | Method
 Navigation: a menu bar under the banner (always visible) AND the sidebar.
-The Method page ends with a "Slide numbers" section for the presentation.
+The sidebar has a button that shrinks it to an icon strip (it never disappears).
 """
 
 from pathlib import Path
@@ -22,6 +22,11 @@ st.set_page_config(page_title="Hospital Patient Record Analysis",
 NAVY, BLUE, ORANGE, TEAL, LIGHT = "#16284a", "#2f6fd6", "#e07a1f", "#1f9d8f", "#f4f6f9"
 INK, MUTED = "#1f2a3d", "#5b6678"
 
+# ---- Selected Chart | Table (and Both | Charges | Stay) button colors ----
+SWITCH_BG = NAVY          # background of the selected button
+SWITCH_TEXT = "#ffffff"   # text color on the selected button
+SWITCH_BORDER = NAVY      # border color of the selected button
+
 DATA_DIR = Path(__file__).parent / "data" / "processed" / "cleaned"
 SEVERITY_ORDER = ["Minor", "Moderate", "Major", "Extreme"]
 AGE_ORDER = ["0 to 17", "0-17", "18 to 29", "18-29", "30 to 49", "30-49",
@@ -35,29 +40,60 @@ PAGES = [("Overview", ":material/grid_view:"),
          ("Method", ":material/hub:")]
 
 # ----------------------------------------------------------------------------
+# SIDEBAR STATE (expanded or shrunk to an icon strip)
+# ----------------------------------------------------------------------------
+if "side_collapsed" not in st.session_state:
+    st.session_state["side_collapsed"] = False
+collapsed = st.session_state["side_collapsed"]
+
+SIDE_W = "76px" if collapsed else "250px"
+COLLAPSED_CSS = """
+section[data-testid="stSidebar"] button { justify-content:center !important; padding:.6rem 0 !important; }
+section[data-testid="stSidebar"] button p { margin:0 !important; }
+[data-testid="stSidebarUserContent"] { padding:1rem .4rem !important; }
+""" if collapsed else ""
+
+# ----------------------------------------------------------------------------
 # STYLE
 # ----------------------------------------------------------------------------
 st.markdown(f"""
 <style>
-  .stApp {{ background:{LIGHT}; }}
+  .stApp {{ background:{LIGHT}; color-scheme:light; }}
 
-  header[data-testid="stHeader"] {{ background:transparent; }}
+  /* Hide Streamlit's own top bar and its sidebar open/close buttons
+     (we use our own button, so the sidebar can never vanish) */
+  header[data-testid="stHeader"] {{ display:none !important; height:0 !important;
+                                    min-height:0 !important; }}
   [data-testid="stToolbar"], [data-testid="stDecoration"], footer {{ display:none !important; }}
-  [data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapsedControl"] button {{
-      background:{NAVY} !important; border-radius:6px; }}
-  [data-testid="stExpandSidebarButton"] *, [data-testid="stSidebarCollapsedControl"] button * {{
-      color:#fff !important; fill:#fff !important; }}
+  [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarHeader"],
+  [data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapsedControl"] {{
+      display:none !important; }}
 
-  .block-container {{ padding:0 2rem 1rem 2rem; max-width:1300px; }}
+  /* Remove the white strip at the very top of the page */
+  [data-testid="stAppViewContainer"], [data-testid="stMain"] {{ padding-top:0 !important; }}
+  [data-testid="stMainBlockContainer"], [data-testid="stAppViewBlockContainer"],
+  .block-container {{ padding-top:0 !important; margin-top:0 !important; }}
+  [data-testid="stElementContainer"]:has(style), .element-container:has(style) {{
+      display:none !important; }}
+
+  /* Sidebar: always visible, fixed width (wide or icon strip) */
+  section[data-testid="stSidebar"] {{
+      width:{SIDE_W} !important; min-width:{SIDE_W} !important; max-width:{SIDE_W} !important;
+      transform:none !important; margin-left:0 !important; visibility:visible !important; }}
+
+  /* Compact layout so everything fits on one screen */
+  .block-container {{ padding:0 1.5rem .5rem 1.5rem !important; max-width:1400px; }}
+  [data-testid="stMain"] [data-testid="stVerticalBlock"] {{ gap:.6rem; }}
 
   [data-testid="stMain"] p, [data-testid="stMain"] li,
   [data-testid="stMain"] label, [data-testid="stMain"] span {{ color:{INK}; }}
 
-  /* Sidebar */
+  /* Sidebar look */
   section[data-testid="stSidebar"] {{ background:{NAVY}; }}
   section[data-testid="stSidebar"] * {{ color:#e8eefc; }}
   .side-title {{ font-weight:700; font-size:1.1rem; margin:.4rem 0 0 0; }}
   .side-sub {{ font-size:.8rem; color:#9fb3d9 !important; margin-bottom:1rem; }}
+  .side-logo {{ font-size:1.5rem; text-align:center; margin:.4rem 0 .8rem 0; }}
   section[data-testid="stSidebar"] button[data-testid="stBaseButton-secondary"],
   section[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] {{
       background:transparent; border:none; box-shadow:none; justify-content:flex-start;
@@ -66,64 +102,88 @@ st.markdown(f"""
       background:rgba(255,255,255,.08); }}
   section[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] {{
       background:rgba(255,255,255,.16); border-left:3px solid #6ea8ff; }}
+  {COLLAPSED_CSS}
 
   /* Top menu bar (buttons in the main area) */
   [data-testid="stMain"] button[data-testid="stBaseButton-secondary"] {{
-      background:#ffffff; border:1px solid #d5dbe6; border-radius:8px; }}
+      background:#ffffff; border:1px solid #d5dbe6; border-radius:8px; min-height:2.2rem; }}
   [data-testid="stMain"] button[data-testid="stBaseButton-secondary"] * {{ color:{INK} !important; }}
   [data-testid="stMain"] button[data-testid="stBaseButton-primary"] {{
-      background:{NAVY}; border:1px solid {NAVY}; border-radius:8px; }}
+      background:{NAVY}; border:1px solid {NAVY}; border-radius:8px; min-height:2.2rem; }}
   [data-testid="stMain"] button[data-testid="stBaseButton-primary"] * {{ color:#ffffff !important; }}
 
-  /* Banner */
-  .banner {{ background:{NAVY}; margin:0 -2rem 1.2rem -2rem; padding:2.6rem 2.5rem 2.2rem;
+  /* Banner (slim) */
+  .banner {{ background:{NAVY}; margin:0 -1.5rem .2rem -1.5rem; padding:.8rem 2rem .7rem;
              border-bottom:3px solid {BLUE}; }}
-  .banner .eyebrow {{ color:#8db4f0 !important; letter-spacing:.18em; font-size:.75rem; }}
+  .banner .eyebrow {{ color:#8db4f0 !important; letter-spacing:.18em; font-size:.68rem; }}
   .banner h1, .banner h1 span {{ color:#ffffff !important; font-family:Georgia,serif;
-                font-size:2.5rem; margin:.3rem 0 .6rem 0; padding:0; }}
-  .banner p {{ color:#cdd9f2 !important; max-width:680px; margin:0; }}
+                font-size:1.7rem; line-height:1.2; margin:.1rem 0 .2rem 0; padding:0; }}
+  .banner p {{ color:#cdd9f2 !important; font-size:.85rem; margin:0; }}
 
   /* Headings, cards */
-  h2.page {{ font-family:Georgia,serif; color:{NAVY} !important; margin:0; }}
-  p.lead {{ color:{MUTED} !important; margin:.2rem 0 1.1rem 0; }}
+  h2.page {{ font-family:Georgia,serif; color:{NAVY} !important; margin:0; font-size:1.5rem;
+             line-height:1.3; }}
+  p.lead {{ color:{MUTED} !important; margin:0; font-size:.9rem; }}
   .kpi {{ background:#fff; border:1px solid #e3e8f0; border-top:3px solid {NAVY};
-          border-radius:8px; padding:.9rem 1rem; min-height:150px;
+          border-radius:8px; padding:.6rem .9rem; min-height:100px;
           box-shadow:0 1px 2px rgba(16,32,64,.05); }}
-  .kpi .l {{ color:{MUTED} !important; font-size:.82rem; line-height:1.25; min-height:2.1em; }}
-  .kpi .v {{ color:{NAVY} !important; font-family:Georgia,serif; font-size:1.6rem;
-             font-weight:700; margin:.25rem 0; white-space:nowrap; }}
-  .kpi .s {{ color:{MUTED} !important; font-size:.76rem; line-height:1.3; }}
+  .kpi .l {{ color:{MUTED} !important; font-size:.8rem; line-height:1.25; min-height:2.1em; }}
+  .kpi .v {{ color:{NAVY} !important; font-family:Georgia,serif; font-size:1.4rem;
+             font-weight:700; margin:.15rem 0; white-space:nowrap; }}
+  .kpi .s {{ color:{MUTED} !important; font-size:.74rem; line-height:1.3; }}
   div[data-testid="stVerticalBlockBorderWrapper"] {{
       background:#fff; border-radius:10px; box-shadow:0 1px 2px rgba(16,32,64,.05); }}
 
   /* Key findings */
   .finding, .finding div {{ color:{INK} !important; }}
-  .finding {{ display:flex; gap:.7rem; padding:.6rem 0; border-bottom:1px solid #eef1f6; }}
+  .finding {{ display:flex; gap:.7rem; padding:.45rem 0; border-bottom:1px solid #eef1f6;
+              font-size:.88rem; }}
   .finding .n {{ background:#e6edfb; color:{NAVY} !important; border-radius:50%; min-width:26px;
                  height:26px; text-align:center; line-height:26px; font-weight:700;
                  font-size:.8rem; }}
 
-  /* Switches (Both | Charges | Stay, Chart | Table) */
-  [data-testid="stSegmentedControl"] button {{
-      background:#ffffff !important; color:{INK} !important; border:1px solid #d5dbe6 !important; }}
-  [data-testid="stSegmentedControl"] button * {{ color:inherit !important; }}
+  /* Switches (Both | Charges | Stay, Chart | Table) - covers every state.
+     Normal buttons: white background + dark text. Selected button: SWITCH_ colors. */
+  [data-testid="stSegmentedControl"], [data-testid="stButtonGroup"] {{ color-scheme:light; }}
+
+  [data-testid="stSegmentedControl"] button,
+  [data-testid="stButtonGroup"] button,
+  [data-testid="stSegmentedControl"] [role="radio"],
+  [data-baseweb="button-group"] button {{
+      background:#ffffff !important; background-image:none !important;
+      border:1px solid #d5dbe6 !important; box-shadow:none !important; }}
+  [data-testid="stSegmentedControl"] button *,
+  [data-testid="stButtonGroup"] button *,
+  [data-testid="stSegmentedControl"] [role="radio"] *,
+  [data-baseweb="button-group"] button * {{ color:{INK} !important; }}
+
   [data-testid="stSegmentedControl"] button[aria-checked="true"],
   [data-testid="stSegmentedControl"] button[aria-pressed="true"],
-  [data-testid="stSegmentedControl"] button[data-testid="stBaseButton-segmented_controlActive"] {{
-      background:{NAVY} !important; color:#ffffff !important; border-color:{NAVY} !important; }}
+  [data-testid="stSegmentedControl"] button[data-testid$="Active"],
+  [data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"],
+  [data-testid="stButtonGroup"] button[aria-checked="true"],
+  [data-testid="stButtonGroup"] button[aria-pressed="true"],
+  [data-testid="stButtonGroup"] button[data-testid$="Active"] {{
+      background:{SWITCH_BG} !important; border-color:{SWITCH_BORDER} !important; }}
+  [data-testid="stSegmentedControl"] button[aria-checked="true"] *,
+  [data-testid="stSegmentedControl"] button[aria-pressed="true"] *,
+  [data-testid="stSegmentedControl"] button[data-testid$="Active"] *,
+  [data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"] *,
+  [data-testid="stButtonGroup"] button[aria-checked="true"] *,
+  [data-testid="stButtonGroup"] button[aria-pressed="true"] *,
+  [data-testid="stButtonGroup"] button[data-testid$="Active"] * {{
+      color:{SWITCH_TEXT} !important; }}
 
   /* Method page */
   .flow {{ display:flex; align-items:stretch; gap:.5rem; flex-wrap:wrap; }}
   .flow .arrow {{ align-self:center; color:{BLUE} !important; font-size:1.4rem; font-weight:700; }}
   .step {{ background:#fff; border:1px solid #e3e8f0; border-top:3px solid {NAVY};
-           border-radius:8px; padding:.8rem 1rem; flex:1; min-width:150px; }}
+           border-radius:8px; padding:.7rem 1rem; flex:1; min-width:150px; }}
   .step b {{ color:{NAVY} !important; display:block; margin-bottom:.25rem; }}
   .step span {{ color:{MUTED} !important; font-size:.82rem; line-height:1.3; }}
   .note {{ background:#fff8e6; border-left:4px solid #f0b429; padding:.7rem 1rem;
            border-radius:6px; color:#5b4a14 !important; }}
   .note * {{ color:#5b4a14 !important; }}
-  .footer {{ text-align:center; color:{MUTED} !important; font-size:.78rem; margin-top:2rem;
-             padding-top:1rem; border-top:1px solid #dde3ec; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -138,11 +198,12 @@ def show(chart):
         st.altair_chart(chart, use_container_width=True, theme=None)
 
 
-def show_table(data):
+def show_table(data, height=None):
+    extra = {"height": int(height)} if height else {}
     try:
-        st.dataframe(data, width="stretch", hide_index=True)
+        st.dataframe(data, width="stretch", hide_index=True, **extra)
     except TypeError:
-        st.dataframe(data, use_container_width=True, hide_index=True)
+        st.dataframe(data, use_container_width=True, hide_index=True, **extra)
 
 
 def switch(key, options):
@@ -159,15 +220,31 @@ def go_to(page_name):
     st.session_state["page"] = page_name
 
 
-def nav_button(name, icon, active, prefix):
-    kind = "primary" if active else "secondary"
-    kwargs = dict(key=f"{prefix}_{name}", type=kind, on_click=go_to, args=(name,))
-    for extra in ({"icon": icon, "width": "stretch"}, {"icon": icon, "use_container_width": True},
-                  {"use_container_width": True}, {}):
+def toggle_sidebar():
+    st.session_state["side_collapsed"] = not st.session_state["side_collapsed"]
+
+
+def smart_button(label, key, icon=None, kind="secondary", on_click=None, args=(), tip=None):
+    """A full-width button that also works on older Streamlit versions."""
+    kwargs = dict(key=key, type=kind, on_click=on_click, args=args)
+    if tip:
+        kwargs["help"] = tip
+    tries = []
+    if icon:
+        tries += [{"icon": icon, "width": "stretch"}, {"icon": icon, "use_container_width": True}]
+    tries += [{"use_container_width": True}, {}]
+    for extra in tries:
         try:
-            return st.button(name, **kwargs, **extra)
+            return st.button(label, **kwargs, **extra)
         except TypeError:
             continue
+
+
+def nav_button(name, icon, active, prefix, compact=False):
+    kind = "primary" if active else "secondary"
+    label = "\u200b" if compact else name      # icon only when the sidebar is shrunk
+    return smart_button(label, f"{prefix}_{name}", icon=icon, kind=kind,
+                        on_click=go_to, args=(name,), tip=name if compact else None)
 
 
 # ----------------------------------------------------------------------------
@@ -318,7 +395,7 @@ def style_chart(chart, height):
             .configure_legend(labelColor=INK, titleColor=MUTED, orient="top", title=None))
 
 
-def bar_chart(data, cat, val, horizontal=True, color=NAVY, height=320, fmt=",.0f"):
+def bar_chart(data, cat, val, horizontal=True, color=NAVY, height=200, fmt=",.0f"):
     order = list(data[cat])
     tip = [alt.Tooltip(f"{cat}:N"), alt.Tooltip(f"{val}:Q", format=fmt)]
     if horizontal:
@@ -360,15 +437,18 @@ def fmt_table(data, formats):
     return out
 
 
-def chart_card(key, title, subtitle, chart, table):
-    """White card with a Chart / Table switch. Used for every chart."""
+def chart_card(key, title, subtitle, chart, table, height=200):
+    """White card with a Chart / Table switch next to the title. Used for every chart."""
     with st.container(border=True):
-        card_title(title, subtitle)
-        view = switch(f"view_{key}", ("Chart", "Table"))
+        t1, t2 = st.columns([3, 2])
+        with t1:
+            card_title(title, subtitle)
+        with t2:
+            view = switch(f"view_{key}", ("Chart", "Table"))
         if view == "Chart":
             show(chart)
         else:
-            show_table(table)
+            show_table(table, height=height + 30)
 
 
 # ----------------------------------------------------------------------------
@@ -381,12 +461,22 @@ if "page" not in st.session_state:
     st.session_state["page"] = "Overview"
 
 with st.sidebar:
-    st.markdown('<p class="side-title">🏥 Analytics Dashboard</p>'
-                '<p class="side-sub">Inpatient discharges, 2010</p>', unsafe_allow_html=True)
+    # Our own shrink / expand button (the sidebar never disappears)
+    smart_button("\u200b" if collapsed else "Collapse menu", "side_toggle",
+                 icon=":material/menu:" if collapsed else ":material/menu_open:",
+                 on_click=toggle_sidebar,
+                 tip="Expand the menu" if collapsed else "Shrink the menu")
+    if collapsed:
+        st.markdown('<div class="side-logo">🏥</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<p class="side-title">🏥 Analytics Dashboard</p>'
+                    '<p class="side-sub">Inpatient discharges, 2010</p>', unsafe_allow_html=True)
     for name, icon in PAGES:
-        nav_button(name, icon, st.session_state["page"] == name, "side")
+        nav_button(name, icon, st.session_state["page"] == name, "side", compact=collapsed)
     st.markdown("---")
-    if USING_REAL:
+    if collapsed:
+        st.caption("✅" if USING_REAL else "⚠️")
+    elif USING_REAL:
         st.caption("✅ Data source: pipeline CSV  \n" + status)
     else:
         st.caption("⚠️ Showing numbers from the presentation.  \n" + status)
@@ -417,7 +507,6 @@ st.markdown(f"""
 for col, (name, icon) in zip(st.columns(len(PAGES)), PAGES):
     with col:
         nav_button(name, icon, page == name, "top")
-st.write("")
 
 # ----------------------------------------------------------------------------
 # PAGE 1: OVERVIEW
@@ -441,7 +530,6 @@ if page == "Overview":
                          f"<b>{c1['County']}</b>, {c1['Discharges'] / c2['Discharges']:.1f}× {c2['County']}"))
     for col, html in zip(st.columns(len(cards)), cards):
         col.markdown(html, unsafe_allow_html=True)
-    st.write("")
 
     rel = pd.DataFrame({"Severity": sev["Severity"],
                         "Charges": sev["Charges"] / minor["Charges"],
@@ -472,7 +560,7 @@ if page == "Overview":
                     tooltip=["Severity", "Measure", alt.Tooltip("Times:Q", format=".1f")])
                 lines = base.mark_line(point=alt.OverlayMarkDef(size=70), strokeWidth=3)
                 labels = base.mark_text(dy=-12, fontSize=11).encode(text=alt.Text("Times:Q", format=".1f"))
-                show(style_chart(lines + labels, 340))
+                show(style_chart(lines + labels, 230))
             else:
                 t = sev.rename(columns={"Charges": "Avg charges ($)", "Stay": "Avg stay (days)"}).copy()
                 t[f"Charges (× {minor['Severity']})"] = rel["Charges"]
@@ -483,7 +571,7 @@ if page == "Overview":
                 show_table(fmt_table(t[keep], {
                     "Patients": "{:,.0f}", "Avg charges ($)": "${:,.0f}", "Avg stay (days)": "{:.1f}",
                     f"Charges (× {minor['Severity']})": "{:.1f}×",
-                    f"Stay (× {minor['Severity']})": "{:.1f}×"}))
+                    f"Stay (× {minor['Severity']})": "{:.1f}×"}), height=260)
 
     with right:
         with st.container(border=True):
@@ -509,44 +597,47 @@ if page == "Overview":
 # ----------------------------------------------------------------------------
 elif page == "Diagnoses":
     page_header("Diagnoses", "Which conditions send the most patients to hospital.")
-    with st.container(border=True):
-        card_title("Most common diagnoses", "Number of discharges per diagnosis.")
-        c1, c2, c3 = st.columns([1, 1, 2])
-        with c1:
-            view = switch("view_diag", ("Chart", "Table"))
-        with c2:
-            if len(diag_all) > 5:
-                top_n = st.slider("Show top", 5, min(20, len(diag_all)), min(10, len(diag_all)))
-            else:
-                top_n = len(diag_all)
-        with c3:
-            search = st.text_input("Search", placeholder="🔍 Search a diagnosis, e.g. pneumonia",
-                                   label_visibility="collapsed")
-        data = diag_all
-        if search:
-            data = data[data["Diagnosis"].str.contains(search, case=False, na=False)]
-        data = data.head(top_n).copy()
+    left, right = st.columns([3, 1])
 
-        if data.empty:
-            st.info("No diagnosis matches your search.")
-        elif view == "Chart":
-            show(bar_chart(data, "Diagnosis", "Patients", height=max(120, 36 * len(data))))
-        else:
-            shown = data.copy()
-            shown["Share (%)"] = data["Patients"] / diag_all["Patients"].sum() * 100
-            shown.insert(0, "Rank", range(1, len(shown) + 1))
-            show_table(fmt_table(shown, {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}))
-        if not data.empty:
-            st.download_button("⬇ Download this table (CSV)", data.to_csv(index=False),
-                               file_name="top_diagnoses.csv", mime="text/csv")
-    st.write("")
-    m1, m2, m3 = st.columns(3)
-    m1.markdown(kpi("Top diagnosis", f"{top_diag['Patients']:,}", f"<b>{top_diag['Diagnosis']}</b>"),
-                unsafe_allow_html=True)
-    m2.markdown(kpi("Runner-up", f"{second_diag['Patients']:,}", f"<b>{second_diag['Diagnosis']}</b>"),
-                unsafe_allow_html=True)
-    m3.markdown(kpi("Distinct diagnoses", f"{len(diag_all):,}", "Categories in the data"),
-                unsafe_allow_html=True)
+    with left:
+        with st.container(border=True):
+            card_title("Most common diagnoses", "Number of discharges per diagnosis.")
+            c1, c2, c3 = st.columns([1, 1, 2])
+            with c1:
+                view = switch("view_diag", ("Chart", "Table"))
+            with c2:
+                if len(diag_all) > 5:
+                    top_n = st.slider("Show top", 5, min(20, len(diag_all)), min(10, len(diag_all)))
+                else:
+                    top_n = len(diag_all)
+            with c3:
+                search = st.text_input("Search", placeholder="🔍 Search a diagnosis, e.g. pneumonia",
+                                       label_visibility="collapsed")
+            data = diag_all
+            if search:
+                data = data[data["Diagnosis"].str.contains(search, case=False, na=False)]
+            data = data.head(top_n).copy()
+
+            if data.empty:
+                st.info("No diagnosis matches your search.")
+            elif view == "Chart":
+                show(bar_chart(data, "Diagnosis", "Patients", height=max(120, 22 * len(data))))
+            else:
+                shown = data.copy()
+                shown["Share (%)"] = data["Patients"] / diag_all["Patients"].sum() * 100
+                shown.insert(0, "Rank", range(1, len(shown) + 1))
+                show_table(fmt_table(shown, {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}), height=280)
+            if not data.empty:
+                st.download_button("⬇ Download this table (CSV)", data.to_csv(index=False),
+                                   file_name="top_diagnoses.csv", mime="text/csv")
+
+    with right:
+        st.markdown(kpi("Top diagnosis", f"{top_diag['Patients']:,}", f"<b>{top_diag['Diagnosis']}</b>"),
+                    unsafe_allow_html=True)
+        st.markdown(kpi("Runner-up", f"{second_diag['Patients']:,}", f"<b>{second_diag['Diagnosis']}</b>"),
+                    unsafe_allow_html=True)
+        st.markdown(kpi("Distinct diagnoses", f"{len(diag_all):,}", "Categories in the data"),
+                    unsafe_allow_html=True)
 
 # ----------------------------------------------------------------------------
 # PAGE 3: SEVERITY & STAY
@@ -555,31 +646,32 @@ elif page == "Severity & Stay":
     page_header("Severity & Stay", "How illness severity and admission type affect cost and days in hospital.")
     sev_tbl = sev.rename(columns={"Charges": "Avg charges ($)", "Stay": "Avg stay (days)"})
     extra = ["Patients"] if "Patients" in sev_tbl else []
+    H = 150
     a, b = st.columns(2)
     with a:
         chart_card("sev_charges", "Average charges by severity", "APR illness severity, US dollars.",
-                   bar_chart(sev, "Severity", "Charges", horizontal=False, fmt="$,.0f"),
+                   bar_chart(sev, "Severity", "Charges", horizontal=False, fmt="$,.0f", height=H),
                    fmt_table(sev_tbl[["Severity", "Avg charges ($)"] + extra],
-                             {"Avg charges ($)": "${:,.0f}", "Patients": "{:,.0f}"}))
+                             {"Avg charges ($)": "${:,.0f}", "Patients": "{:,.0f}"}), height=H)
     with b:
         chart_card("sev_stay", "Average stay by severity", "Days in hospital.",
-                   bar_chart(sev, "Severity", "Stay", horizontal=False, color=BLUE, fmt=".1f"),
+                   bar_chart(sev, "Severity", "Stay", horizontal=False, color=BLUE, fmt=".1f", height=H),
                    fmt_table(sev_tbl[["Severity", "Avg stay (days)"] + extra],
-                             {"Avg stay (days)": "{:.1f}", "Patients": "{:,.0f}"}))
+                             {"Avg stay (days)": "{:.1f}", "Patients": "{:,.0f}"}), height=H)
     c, d = st.columns(2)
     with c:
         if "adm" in T:
             chart_card("adm", "Average stay by admission type",
-                       "Small groups (for example Trauma) can look extreme, so check the table.",
-                       bar_chart(T["adm"], "Admission type", "Avg days", color=BLUE, height=280, fmt=".1f"),
-                       fmt_table(T["adm"], {"Avg days": "{:.1f}", "Patients": "{:,.0f}"}))
+                       "Small groups (e.g. Trauma) can look extreme.",
+                       bar_chart(T["adm"], "Admission type", "Avg days", color=BLUE, height=H, fmt=".1f"),
+                       fmt_table(T["adm"], {"Avg days": "{:.1f}", "Patients": "{:,.0f}"}), height=H)
     with d:
         if "mortality" in T:
             chart_card("mortality", "Patients by risk of mortality", "APR risk-of-mortality category.",
                        bar_chart(T["mortality"], "Risk of mortality", "Patients",
-                                 horizontal=False, color=TEAL, height=280),
+                                 horizontal=False, color=TEAL, height=H),
                        fmt_table(with_share(T["mortality"], "Patients"),
-                                 {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}))
+                                 {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}), height=H)
 
 # ----------------------------------------------------------------------------
 # PAGE 4: PATIENTS
@@ -590,35 +682,35 @@ elif page == "Patients":
     with a:
         if "age" in T:
             chart_card("age", "Patient volume by age group", "Hospitalisation rises with age.",
-                       bar_chart(T["age"], "Age group", "Patients", horizontal=False),
+                       bar_chart(T["age"], "Age group", "Patients", horizontal=False, height=170),
                        fmt_table(with_share(T["age"], "Patients"),
-                                 {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}))
+                                 {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}), height=170)
     with b:
         if "county" in T:
             chart_card("county", "Top 10 counties by volume", "Discharges per county.",
-                       bar_chart(T["county"], "County", "Discharges", color=BLUE),
+                       bar_chart(T["county"], "County", "Discharges", color=BLUE, height=210),
                        fmt_table(with_share(T["county"], "Discharges"),
-                                 {"Discharges": "{:,.0f}", "Share (%)": "{:.1f}%"}))
+                                 {"Discharges": "{:,.0f}", "Share (%)": "{:.1f}%"}), height=210)
     c, d = st.columns([1, 2])
     with c:
         if "gender" in T:
-            donut = alt.Chart(T["gender"]).mark_arc(innerRadius=55).encode(
+            donut = alt.Chart(T["gender"]).mark_arc(innerRadius=50).encode(
                 theta="Patients:Q",
                 color=alt.Color("Gender:N", scale=alt.Scale(
                     domain=["Female", "Male", "Unknown"], range=[NAVY, ORANGE, "#9aa5b8"])),
                 tooltip=["Gender", alt.Tooltip("Patients:Q", format=",")])
-            chart_card("gender", "Patients by gender", "", style_chart(donut, 240),
+            chart_card("gender", "Patients by gender", "", style_chart(donut, 190),
                        fmt_table(with_share(T["gender"], "Patients"),
-                                 {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}))
+                                 {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}), height=190)
     with d:
         if "hospital" in T:
             chart_card("hospital", "Top 10 hospitals by patient count", "",
-                       bar_chart(T["hospital"], "Hospital", "Patients", color=TEAL, height=300),
+                       bar_chart(T["hospital"], "Hospital", "Patients", color=TEAL, height=210),
                        fmt_table(with_share(T["hospital"], "Patients"),
-                                 {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}))
+                                 {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}), height=210)
 
 # ----------------------------------------------------------------------------
-# PAGE 5: METHOD (+ slide numbers)
+# PAGE 5: METHOD
 # ----------------------------------------------------------------------------
 else:
     page_header("Method", "How the data went from a raw file to this dashboard.")
@@ -631,7 +723,6 @@ else:
     st.markdown('<div class="flow">' + '<div class="arrow">→</div>'.join(
         f'<div class="step"><b>{n}</b><span>{d}</span></div>' for n, d in flow) + '</div>',
         unsafe_allow_html=True)
-    st.write("")
 
     left, right = st.columns([1, 1])
     with left:
@@ -651,84 +742,3 @@ else:
     st.markdown("""<div class="note"><b>Limitations.</b> Data is a sample of the full state file ·
     some severity values are missing · stays marked “120+” are capped at 120 days ·
     charges are not the same as actual costs.</div>""", unsafe_allow_html=True)
-    st.write("")
-
-    # ---------------- Slide numbers ----------------
-    with st.container(border=True):
-        card_title("Slide numbers for the presentation",
-                   "Calculated from your pipeline CSV. Copy these into the matching slides.")
-        if not USING_REAL:
-            st.info("These numbers need your pipeline CSV. Right now the dashboard is showing the "
-                    "numbers from the old presentation, so there is nothing new to copy.")
-        else:
-            facts = [("Records analysed (after cleaning)", f"{T['records']:,}"),
-                     ("Rows in the CSV files", f"{meta.get('csv_rows', 0):,}"),
-                     ("Rows dropped for a missing key field", f"{meta.get('csv_rows', 0) - T['records']:,}"),
-                     ("Fields kept for analysis", f"{meta.get('columns', '–')}"),
-                     ("Counties represented", f"{T.get('county_count', '–')}"),
-                     ("Discharge year", "2010")]
-            facts_df = pd.DataFrame(facts, columns=["Fact", "Value"])
-
-            s8 = diag_all.head(8).copy()
-            s8["Share (%)"] = s8["Patients"] / diag_all["Patients"].sum() * 100
-            s9 = sev[["Severity", "Charges"]].copy()
-            s9["× Minor"] = s9["Charges"] / s9["Charges"].iloc[0]
-            s9 = s9.rename(columns={"Charges": "Avg charges ($)"})
-            s10a = sev[["Severity", "Stay", "Patients"]].copy()
-            s10a["× Minor"] = s10a["Stay"] / s10a["Stay"].iloc[0]
-            s10a = s10a.rename(columns={"Stay": "Avg stay (days)"})
-            s10b = T["adm"] if "adm" in T else None
-            s11a = with_share(T["age"], "Patients") if "age" in T else None
-            s11b = with_share(T["county"], "Discharges") if "county" in T else None
-
-            export = {"Slide 4 and 6: headline facts": facts_df,
-                      "Slide 8: top 8 diagnoses": s8,
-                      "Slide 9: avg charges by severity": s9,
-                      "Slide 10: avg stay by severity": s10a,
-                      "Slide 10: avg stay by admission type": s10b,
-                      "Slide 11: patients by age group": s11a,
-                      "Slide 11: top 10 counties": s11b}
-            export = {k: v for k, v in export.items() if v is not None}
-
-            tabs = st.tabs(["Slides 4 & 6", "Slide 8", "Slide 9", "Slide 10", "Slide 11"])
-
-            def table_block(label, data, formats, filename):
-                st.markdown(f"**{label}**")
-                show_table(fmt_table(data, formats))
-                st.download_button("⬇ Download CSV", data.to_csv(index=False),
-                                   file_name=filename, mime="text/csv", key=f"dl_{filename}")
-
-            with tabs[0]:
-                table_block("Headline facts", facts_df, {}, "slide_4_6_facts.csv")
-            with tabs[1]:
-                table_block("Most common diagnoses (top 8)", s8,
-                            {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}, "slide_8_diagnoses.csv")
-            with tabs[2]:
-                table_block("Average total charges by severity", s9,
-                            {"Avg charges ($)": "${:,.0f}", "× Minor": "{:.1f}×"}, "slide_9_charges.csv")
-            with tabs[3]:
-                table_block("Average stay by severity", s10a,
-                            {"Avg stay (days)": "{:.1f}", "Patients": "{:,.0f}", "× Minor": "{:.1f}×"},
-                            "slide_10_stay_severity.csv")
-                if s10b is not None:
-                    table_block("Average stay by admission type", s10b,
-                                {"Avg days": "{:.1f}", "Patients": "{:,.0f}"}, "slide_10_stay_admission.csv")
-                    st.caption("Check the Patients column. A very small group, such as Trauma, can look "
-                               "extreme, so be careful before calling it the longest stay.")
-            with tabs[4]:
-                if s11a is not None:
-                    table_block("Patient volume by age group", s11a,
-                                {"Patients": "{:,.0f}", "Share (%)": "{:.1f}%"}, "slide_11_age.csv")
-                if s11b is not None:
-                    table_block("Top 10 counties by volume", s11b,
-                                {"Discharges": "{:,.0f}", "Share (%)": "{:.1f}%"}, "slide_11_counties.csv")
-
-            everything = "\n\n".join(f"== {name} ==\n{data.round(2).to_string(index=False)}"
-                                     for name, data in export.items())
-            st.download_button("⬇ Download ALL slide numbers (one text file)", everything,
-                               file_name="slide_numbers.txt", mime="text/plain", key="dl_all")
-
-    if USING_REAL:
-        with st.expander("Preview the cleaned data (first 100 rows)"):
-            show_table(df.head(100))
-
